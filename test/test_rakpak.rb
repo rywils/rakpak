@@ -390,6 +390,7 @@ end
   end
 
   def test_a_failed_spawn_does_not_leak_pipes
+    skip "needs /proc" unless File.directory?("/proc/self/fd")
     before = Dir.children("/proc/self/fd").size
     3.times do
       plan = AllFail.new(paths: ["#{@dir}/src"], outdir: @dir,
@@ -546,7 +547,9 @@ class ArgsTest < Minitest::Test
   def test_a_folder_argument_is_expanded_and_used
     o = Rakpak.parse(["#{@dir}/docs/"])
     assert_equal "#{@dir}/docs", o.dir
-    Dir.chdir(@dir) { assert_equal @dir, Rakpak.parse(["."]).dir }
+    # macOS temp folders live behind a /private symlink, and "." resolves
+    # to the real one.
+    Dir.chdir(@dir) { assert_equal Dir.pwd, Rakpak.parse(["."]).dir }
   end
 
   def test_pack_opens_beside_the_target_with_it_queued
@@ -1032,7 +1035,9 @@ class WhereStepTest < Minitest::Test
     to_where_step
     text = plain(modal)
     assert_includes text, "1. This directory"
-    assert_includes text, @dir, "the full path, not a shortened one"
+    # A long temp path is clipped from the left to fit the panel, so check
+    # the tail; a tilde-shortened path would not have it.
+    assert_includes text, @dir[-30..], "the real path, not a tilde-shortened one"
     assert_includes text, "2. Home directory"
     assert_includes text, Dir.home
     assert_includes text, "3. Specify"
@@ -1309,7 +1314,11 @@ class SecondReviewTest < Minitest::Test
   end
 
   def test_a_filename_that_is_not_utf8_still_lists_and_filters
-    File.write(File.join(@dir, "caf\xE9.txt".b), "x")
+    begin
+      File.write(File.join(@dir, "caf\xE9.txt".b), "x")
+    rescue Errno::EILSEQ, Errno::EINVAL
+      skip "this filesystem refuses names that are not valid UTF-8"
+    end
     File.write("#{@dir}/plain.txt", "y")
     b = Rakpak::Browser.new(@dir)
     assert_equal 2, b.entries.size, "one bad name must not blank the whole folder"
