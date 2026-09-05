@@ -1,0 +1,121 @@
+# frozen_string_literal: true
+
+require "io/console"
+
+module Rakpak
+  # Raw-mode terminal control and key decoding.
+  module Term
+    ARROWS = { "A" => :up, "B" => :down, "C" => :right, "D" => :left,
+               "H" => :home, "F" => :end }.freeze
+
+    TILDE = { "1" => :home, "3" => :delete, "4" => :end,
+              "5" => :pgup, "6" => :pgdn, "7" => :home, "8" => :end }.freeze
+
+    class << self
+      attr_accessor :resized
+    end
+    self.resized = false
+
+    module_function
+
+    def size
+      h, w = $stdout.winsize
+      [w.to_i.positive? ? w : 80, h.to_i.positive? ? h : 24]
+    rescue StandardError
+      [80, 24]
+    end
+
+    def start
+      @stty = `stty -g 2>/dev/null`.chomp
+      $stdin.raw!
+      $stdout.write("\e[?1049h\e[?25l\e[2J")
+      $stdout.flush
+      trap("WINCH") { Term.resized = true }
+    end
+
+    def stop
+      $stdout.write("\e[?25h\e[?1049l")
+      $stdout.flush
+      if @stty && !@stty.empty?
+        system("stty", @stty, out: File::NULL, err: File::NULL)
+      else
+        begin
+          $stdin.cooked!
+        rescue StandardError
+          nil
+        end
+      end
+    end
+
+    def flush_frame(str)
+      $stdout.write(str)
+      $stdout.flush
+    end
+
+    # Blocks up to `timeout` seconds. Returns a key symbol, a printable
+    # String, or nil on timeout.
+    def wait_key(timeout = nil)
+      return nil unless IO.select([$stdin], nil, nil, timeout)
+
+      read_key
+    end
+
+    def read_key
+      c = getc_raw
+      return nil if c.nil?
+
+      case c
+      when "\e"  then read_escape
+      when "\r", "\n" then :enter
+      when "\t"  then :tab
+      when "\x7f", "\b" then :backspace
+      when " "   then :space
+      when "\x00".."\x1f" then :"ctrl_#{(c.ord + 96).chr}"
+      else c
+      end
+    end
+
+    def getc_raw(timeout = nil)
+      return nil if timeout && !IO.select([$stdin], nil, nil, timeout)
+
+      $stdin.getc
+    rescue IOError, Errno::EINTR
+      nil
+    end
+
+    # An arrow key arrives as several bytes. Over a slow link they can be
+    # split across reads, so allow a generous window before concluding the
+    # user pressed a bare Esc. The delay is only ever paid on a real Esc.
+    ESC_WINDOW = 0.05
+
+    def read_escape
+      seq = +""
+      12.times do
+        ch = getc_raw(ESC_WINDOW)
+        break if ch.nil?
+
+        seq << ch
+        break if seq.match?(/\A\[[0-9;]*[A-Za-z~]\z/) || seq.match?(/\AO[A-Za-z]\z/)
+      end
+      return :esc if seq.empty?
+
+      body = seq[1..] || ""
+      if seq.start_with?("O")
+        ARROWS[body] || :esc
+      elsif seq.start_with?("[")
+        if (m = body.match(/\A([0-9;]*)([A-Za-z~])\z/))
+          num, fin = m[1], m[2]
+          return ARROWS[fin] if ARROWS.key?(fin)
+          return TILDE[num.split(";").first.to_s] || :esc if fin == "~"
+
+          :esc
+        else
+          :esc
+        end
+      else
+        # Alt-<char>: the whole sequence is the character.
+        :"alt_#{seq}"
+      end
+    end
+  end
+end
