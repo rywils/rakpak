@@ -1,6 +1,15 @@
-# rakpak
+<p align="center">
+  <img src="https://res.cloudinary.com/noqoikpl/image/upload/f_auto,q_auto/rakpak-upper" alt="rakpak" width="520">
+</p>
 
-Tag files and folders anywhere on your filesystem, then archive them all at once.
+<p align="center">
+  <a href="https://github.com/rywils/rakpak/actions/workflows/ci.yml"><img src="https://github.com/rywils/rakpak/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
+  <a href="https://rubygems.org/gems/rakpak"><img src="https://img.shields.io/gem/v/rakpak" alt="gem version"></a>
+  <a href="https://rubygems.org/gems/rakpak"><img src="https://img.shields.io/gem/dt/rakpak" alt="downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/rywils/rakpak" alt="license"></a>
+</p>
+
+<p align="center">Tag files and folders anywhere on your filesystem, then archive them all at once.</p>
 
 You walk around, press `space` on anything you want, press `p`, answer a few
 questions, and it builds the archive. The progress view can be sent to the
