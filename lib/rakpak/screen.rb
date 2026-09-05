@@ -36,6 +36,8 @@ module Rakpak
         break if cx >= @w
 
         if cx >= 0 && cw.positive?
+          clear_halves(row + cx)
+          clear_halves(row + cx + 1) if cw == 2 && cx + 1 < @w
           @ch[row + cx] = g
           @st[row + cx] = style
           if cw == 2 && cx + 1 < @w
@@ -46,6 +48,15 @@ module Rakpak
         cx += cw
       end
       cx
+    end
+
+    # A double-width glyph owns two cells: itself and an empty marker after
+    # it. Writing over either half must blank the other, or the row renders
+    # one column too wide and the terminal wraps it.
+    def clear_halves(idx)
+      col = idx % @w
+      @ch[idx - 1] = " " if @ch[idx] == "" && col.positive? && Text.gw(@ch[idx - 1]) == 2
+      @ch[idx + 1] = " " if col < @w - 1 && @ch[idx + 1] == "" && Text.gw(@ch[idx]) == 2
     end
 
     # Last line of defence: a single binary byte reaching @ch would make the
@@ -66,6 +77,7 @@ module Rakpak
           xx = x + dx
           next if xx.negative? || xx >= @w
 
+          clear_halves(row + xx)
           @ch[row + xx] = char
           @st[row + xx] = style
         end

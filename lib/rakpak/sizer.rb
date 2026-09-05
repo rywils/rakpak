@@ -13,7 +13,7 @@ module Rakpak
       @queue = Queue.new
       @lock = Mutex.new
       @pending = {}
-      @worker = Thread.new { loop { work(@queue.pop) } }
+      @worker = Thread.new { loop { work(*@queue.pop) } }
       @worker.abort_on_exception = false
     end
 
@@ -23,12 +23,14 @@ module Rakpak
     end
 
     def request(path)
+      token = nil
       @lock.synchronize do
         return if @cache.key?(path) || @pending[path]
 
-        @pending[path] = true
+        token = Object.new
+        @pending[path] = token
       end
-      @queue << path
+      @queue << [path, token]
     end
 
     def total(paths)
@@ -55,17 +57,18 @@ module Rakpak
 
     private
 
-    def work(path)
+    def work(path, token)
       res = measure(path)
       @lock.synchronize do
-        # Forgotten or invalidated while we were walking: the result is
-        # for a request nobody holds any more.
-        next unless @pending.delete(path)
+        # Forgotten, invalidated, or re-requested while we were walking:
+        # only the walk that the current request started may answer it.
+        next unless @pending[path].equal?(token)
 
+        @pending.delete(path)
         @cache[path] = res
       end
     rescue StandardError
-      @lock.synchronize { @pending.delete(path) }
+      @lock.synchronize { @pending.delete(path) if @pending[path].equal?(token) }
     end
 
     def measure(path)

@@ -35,8 +35,24 @@ module Rakpak
     # Drop anything already covered by another selection: tagging ~/docs and
     # then ~/docs/notes would otherwise store notes twice, silently.
     def self.prune(paths)
-      sorted = paths.map { |p| File.expand_path(p) }.uniq.sort
-      sorted.reject { |p| sorted.any? { |other| p.start_with?("#{other}/") } }
+      # Sorting by path components puts every descendant right after its
+      # ancestor ("a/b" before "a-x"), so one pass with a stack of accepted
+      # ancestors is enough, however many paths there are.
+      sorted = paths.map { |p| File.expand_path(p) }.uniq.sort_by { |p| p.split("/") }
+      kept = []
+      stack = []
+      sorted.each do |p|
+        stack.pop while stack.any? && !inside?(p, stack.last)
+        next if stack.any?
+
+        kept << p
+        stack << p
+      end
+      kept
+    end
+
+    def self.inside?(path, dir)
+      path.start_with?(dir == "/" ? "/" : "#{dir}/")
     end
 
     # "none" needs no tool so it is always available; it is the last
@@ -149,6 +165,9 @@ module Rakpak
 
     def ensure_ext(name, ext)
       return name if name.downcase.end_with?(ext)
+      # backup.tar gzipped on its own is backup.tar.gz; the name is the
+      # point, so nothing is stripped from it.
+      return "#{name}#{ext}" if single_compress?
 
       # Strip a competing archive extension the user may have typed.
       typed = ARCHIVE_EXTS.find { |e| name.downcase.end_with?(e) }
@@ -253,7 +272,7 @@ module Rakpak
       warn = []
       o = output
       warn << "#{File.basename(o)} already exists and will be replaced" if File.exist?(o)
-      if @paths.any? { |p| o.start_with?("#{p}/") }
+      if @paths.any? { |p| Plan.inside?(o, p) }
         warn << "output sits inside a selected folder, so it may archive itself"
       end
       warn

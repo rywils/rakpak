@@ -38,7 +38,7 @@ module Rakpak
       return list unless @filter && !@filter.empty?
 
       needle = @filter.downcase
-      list.select { |e| e.name.downcase.include?(needle) }
+      list.select { |e| e.fold.include?(needle) }
     end
 
     def index
@@ -58,6 +58,9 @@ module Rakpak
       path = File.expand_path(path)
       return unless @tags.add?(path)
 
+      # A figure may linger from a cursor-only pack of this path; a new tag
+      # must not trust it.
+      @sizer&.forget(path)
       @sizer&.request(path)
     end
 

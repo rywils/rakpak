@@ -84,7 +84,7 @@ module Rakpak
                  elsif sel then Theme::CUR_BG + "\e[38;5;252m"
                  else Theme::MODAL_BG + Theme::DIM
                  end
-        screen.put(x + 24, row, Text.fit(note, w - 25), nstyle) if cx <= w
+        screen.put(x + 24, row, Text.fit(note, w - 25), nstyle) if w > 25 && cx <= x + 24
       end
     end
 
@@ -298,12 +298,19 @@ module Rakpak
     def field(screen, x, row, w, active: true)
       screen.fill(x, row, w, 1, " ", Theme::SEL_BG)
       width = w - 2
-      off = [@cur - width + 1, 0].max
-      shown = @buf[off, width] || ""
+      # Scroll so the cursor is visible, counting columns, not characters.
+      off = 0
+      off += 1 while off < @cur && Text.width(@buf[off...@cur]) >= width
+      shown = +""
+      @buf[off..].to_s.each_grapheme_cluster do |g|
+        break if Text.width(shown) + Text.gw(g) > width
+
+        shown << g
+      end
       screen.put(x + 1, row, shown, Theme::SEL_BG + (active ? "\e[38;5;231m" : Theme::DIM))
       return unless active
 
-      cx = x + 1 + (@cur - off)
+      cx = x + 1 + Text.width(@buf[off...@cur].to_s)
       ch = @buf[@cur] || " "
       screen.put(cx, row, ch, "\e[7m\e[38;5;39m")
     end

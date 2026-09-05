@@ -112,6 +112,12 @@ module Rakpak
       path.start_with?("#{home}/") ? "~#{path[home.length..]}" : path
     end
 
+    # For text that goes to the terminal without passing through Screen:
+    # control and C1 bytes could otherwise be executed as escape sequences.
+    def plain(str)
+      str.to_s.dup.force_encoding(Encoding::UTF_8).scrub("?").gsub(/[\u0000-\u001f\u007f-\u009f]/, "?")
+    end
+
     HUMAN = %w[B K M G T P].freeze
 
     def bytes(n)

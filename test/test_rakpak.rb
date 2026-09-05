@@ -4,6 +4,7 @@ $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "minitest/autorun"
 require "tmpdir"
 require "fileutils"
+require "stringio"
 require "rakpak"
 
 class TextTest < Minitest::Test
@@ -1239,5 +1240,164 @@ class OutputNameTest < Minitest::Test
     key(:enter)
     assert_kind_of Rakpak::ConfirmModal, modal
     assert_equal "#{@dir}/safe.tar.gz", @app.instance_variable_get(:@plan).output
+  end
+end
+
+class ReportSanitiserTest < Minitest::Test
+  def test_the_exit_summary_never_prints_escape_sequences
+    base = Dir.mktmpdir("rakpak")
+    evil = File.join(base, "out\e]0;pwned\a")
+    Dir.mkdir(evil)
+    File.write("#{base}/f", "x")
+    plan = Rakpak::Plan.new(paths: ["#{base}/f"], outdir: evil, basename: "a", target: :tar)
+    job = Rakpak::Job.new(plan).start
+    job.wait(10)
+    assert_equal :done, job.state, job.error
+    app = Rakpak::App.new(base)
+    app.instance_variable_set(:@jobs, [job])
+    out = StringIO.new
+    saved = $stdout
+    $stdout = out
+    app.send(:report)
+    $stdout = saved
+    refute_includes out.string, "\e", "a folder name must not reach the shell as an escape sequence"
+    assert_includes out.string, "a.tar"
+  ensure
+    $stdout = saved if saved
+    FileUtils.remove_entry(base) if base
+  end
+end
+
+class SecondReviewTest < Minitest::Test
+  def setup
+    @dir = Dir.mktmpdir("rakpak")
+  end
+
+  def teardown = FileUtils.remove_entry(@dir)
+
+  def with_stdin(bytes)
+    r, w = IO.pipe
+    w.write(bytes.b)
+    w.close
+    saved = $stdin
+    $stdin = r
+    yield
+  ensure
+    $stdin = saved
+  end
+
+  def test_a_stray_byte_is_dropped_and_a_split_utf8_char_is_reassembled
+    with_stdin("\xC3") { assert_nil Rakpak::Term.read_key }
+    with_stdin("\xC3\xA9") do
+      k = Rakpak::Term.read_key
+      assert_equal "é", k
+      assert k.valid_encoding?
+    end
+    with_stdin("\xFF") { assert_nil Rakpak::Term.read_key }
+  end
+
+  def test_a_browsed_folder_with_a_dollar_sign_is_used_as_is
+    odd = File.join(@dir, "proj$HOME")
+    Dir.mkdir(odd)
+    File.write("#{odd}/f", "x")
+    app = Rakpak::App.new(odd, pack: ["#{odd}/f"])
+    key = ->(k) { app.send(:modal_key, k) }
+    key.call(:enter)
+    key.call(:enter)
+    key.call(:enter) # 1. This directory
+    assert_equal odd, app.instance_variable_get(:@plan).outdir
+  end
+
+  def test_a_filename_that_is_not_utf8_still_lists_and_filters
+    File.write(File.join(@dir, "caf\xE9.txt".b), "x")
+    File.write("#{@dir}/plain.txt", "y")
+    b = Rakpak::Browser.new(@dir)
+    assert_equal 2, b.entries.size, "one bad name must not blank the whole folder"
+    b.handle("/")
+    "plain".each_char { |c| b.handle(c) }
+    assert_equal ["plain.txt"], b.entries.map(&:name)
+  end
+
+  def test_overwriting_half_a_wide_glyph_keeps_the_row_the_right_width
+    s = Rakpak::Screen.new(20, 1)
+    s.put(0, 0, "日本語")
+    s.put(4, 0, " ") # lands on the second half of 本
+    row = s.render.gsub(/\e\[[0-9;]*[A-Za-z]/, "").split("\r\n").first
+    assert_equal 20, Rakpak::Text.width(row), "the row must still be exactly 20 columns"
+    s.fill(1, 0, 1, 1, "x")
+    row = s.render.gsub(/\e\[[0-9;]*[A-Za-z]/, "").split("\r\n").first
+    assert_equal 20, Rakpak::Text.width(row)
+  end
+
+  def test_the_input_cursor_sits_after_wide_text
+    m = Rakpak::InputModal.new(title: "t", value: "日本語")
+    s = Rakpak::Screen.new(60, 8)
+    m.draw(s)
+    row = s.render.gsub(/\e\[[0-9;]*[A-Za-z]/, "").split("\r\n").find { |l| l.include?("日本語") }
+    assert_equal 60, Rakpak::Text.width(row)
+  end
+
+  def test_a_lone_tar_gzipped_on_its_own_keeps_its_name
+    File.write("#{@dir}/backup.tar", "t")
+    plan = Rakpak::Plan.new(paths: ["#{@dir}/backup.tar"], outdir: @dir, basename: "backup.tar", target: :zip)
+    plan.compressor = Rakpak.compressor(:gzip)
+    assert_equal "backup.tar.gz", File.basename(plan.output)
+    plan.target = :both
+    plan.basename = "backup.tar"
+    assert_equal "backup.tar.gz", File.basename(plan.output), "for a tarball the typed .tar is still folded"
+  end
+
+  def test_a_stale_walk_cannot_overwrite_a_fresh_request
+    sizer = Rakpak::Sizer.new
+    slow = true
+    sizer.define_singleton_method(:measure) do |path|
+      sleep 0.15 if slow
+      Rakpak::Sizer::Result.new(slow ? 1 : 2, 1, false)
+    end
+    sizer.request("x")
+    sleep 0.02
+    sizer.invalidate!
+    slow = false
+    sizer.request("x")
+    sleep 0.3
+    assert_equal 2, sizer["x"].bytes, "the answer must come from the walk started by the current request"
+  end
+
+  def test_prune_handles_root_and_sorts_by_components
+    assert_equal ["/"], Rakpak::Plan.prune(["/", "/etc"])
+    FileUtils.mkdir_p("#{@dir}/a/b")
+    FileUtils.mkdir_p("#{@dir}/a-x")
+    got = Rakpak::Plan.prune(["#{@dir}/a-x", "#{@dir}/a/b", "#{@dir}/a"])
+    assert_equal ["#{@dir}/a", "#{@dir}/a-x"], got, "a/b is inside a even though a-x sorts between them"
+    many = (1..3000).map { |i| "#{@dir}/f#{i}" }
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Rakpak::Plan.prune(many)
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t, :<, 0.5
+  end
+
+  def test_root_selection_warns_about_archiving_itself
+    plan = Rakpak::Plan.new(paths: ["/"], outdir: @dir, basename: "all", target: :tar)
+    assert(plan.warnings.any? { |w| w.include?("archive itself") })
+  end
+
+  def test_select_notes_survive_a_wide_terminal
+    items = [Rakpak::SelectModal::Item.new(label: "tarball", value: :t, enabled: false,
+                                           why: "tar not installed", blurb: "")]
+    m = Rakpak::SelectModal.new(title: "t", items: items)
+    s = Rakpak::Screen.new(200, 20)
+    m.draw(s)
+    assert_includes s.render.gsub(/\e\[[0-9;]*[A-Za-z]/, ""), "tar not installed"
+  end
+
+  def test_tagging_after_a_cursor_only_pack_measures_again
+    FileUtils.mkdir_p("#{@dir}/x")
+    sizer = Rakpak::Sizer.new
+    b = Rakpak::Browser.new(@dir, sizer: sizer)
+    sizer.request("#{@dir}/x")
+    sleep 0.02 until sizer["#{@dir}/x"]
+    File.write("#{@dir}/x/big", "z" * 500)
+    b.tag("#{@dir}/x")
+    sleep 0.02 until sizer["#{@dir}/x"]
+    assert_equal 500, sizer["#{@dir}/x"].bytes
   end
 end

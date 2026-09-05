@@ -422,7 +422,9 @@ module Rakpak
       when :where
         @where = modal.index
         @where_text = modal.text
-        @plan.outdir = Rakpak.expand_dir(modal.result)
+        # ~ and $HOME are for typed text; a browsed folder is taken as is,
+        # even one with a dollar sign in its name.
+        @plan.outdir = @where == 2 ? Rakpak.expand_dir(modal.result) : modal.result
       when :output
         @name_edited = true
         @plan.basename = modal.result
@@ -623,7 +625,9 @@ module Rakpak
       return if done.empty?
 
       done.each do |j|
-        j.summary.each { |name, size| puts "#{File.join(j.plan.outdir, name)}  #{Text.bytes(size)}" }
+        # Printed after the TUI has gone, straight to the shell, so a folder
+        # or file name carrying an escape sequence must be defanged.
+        j.summary.each { |name, size| puts "#{Text.plain(File.join(j.plan.outdir, name))}  #{Text.bytes(size)}" }
       end
     end
   end

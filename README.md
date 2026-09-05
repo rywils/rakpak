@@ -2,11 +2,11 @@
 
 Tag files and folders anywhere on your filesystem, then archive them all at once.
 
-A yazi-style file browser that does one thing: you walk around, press `space` on
-anything you want, press `p`, answer a few questions, and it builds the
-archive, with a live progress view you can send to the background.
+You walk around, press `space` on anything you want, press `p`, answer a few
+questions, and it builds the archive. The progress view can be sent to the
+background while you keep browsing.
 
-No gems. Ruby 3.0+ and a terminal.
+Needs Ruby 3.0 or newer and nothing else.
 
 ## Install
 
@@ -46,17 +46,17 @@ and its compression. The archive is written next to that first path. Press
 
 ## The flow
 
-1. **Browse and tag.** Vim keys or arrows, interchangeably. `space` tags whatever is under the
+1. **Browse and tag.** Vim keys or arrows. `space` tags whatever is under the
    cursor and moves down. Tags persist as you walk, so you can pick something in
    `~/Documents`, walk to `/etc`, and tag more. `T` reviews everything tagged.
-   `t` opens a queue pane on the far left that stays up while you browse,
-   listing each queued item by name, where it lives, and its size, with the
+   `t` opens a queue pane on the far left that stays up while you browse. It
+   lists each queued item by name, where it lives, and its size, with the
    running total on top.
 2. **`p` to pack.** Choose *compressed tarball* (the default), *plain
    tarball*, or *zip archive*.
 3. **Set the flags.** Compression method, level, and the switches for that
    format. Compressed tarballs default to gzip, the one every system can
-   read. Only options your machine can actually run are offered.
+   read.
 4. **Say where.** This directory, your home directory, or one you type
    into the field right there. `~`, `$HOME` and absolute paths all work,
    and typing anything jumps to the field.
@@ -66,10 +66,6 @@ and its compression. The archive is written next to that first path. Press
 7. **Watch it, or press `b`** to drop it into the background and keep browsing.
 
 If nothing is tagged, `p` archives whatever the cursor is on.
-
-Navigation follows yazi exactly: `enter`, `l` and `→` all descend, so the key
-you press fifty times a session does what your fingers expect. The one action
-this tool has gets its own key rather than stealing that one.
 
 ## Keys
 
@@ -89,7 +85,7 @@ this tool has gets its own key rather than stealing that one.
 | `/` | filter this folder |
 | `.` | show hidden files |
 | `ctrl-r` | reload |
-| `p` | **pack**: archive what is tagged |
+| `p` | pack: archive what is tagged |
 | `b` | watch a running job |
 | `?` | all keys |
 | `q` | quit |
@@ -116,15 +112,13 @@ tarball around it. For a folder those are greyed out with the reason, since
 
 Everything is probed at startup: `PATH` for the compressors, `tar --version` to
 tell GNU tar from bsdtar from busybox, and `zip -v` for its compiled-in methods.
-Options that will not work on this machine are shown greyed out **with the
-reason**, and cannot be selected by accident, rather than being hidden or
-failing halfway through a job.
+Anything that will not work on this machine is greyed out with the reason.
 
 ## How the archive is shaped
 
 Members are stored relative to the deepest folder that contains every tagged
-path, which is shown on the confirm screen. Tag `~/a/b` and `~/c` and you get
-`a/b` and `c` inside the archive, not two absolute paths.
+path, which is shown on the confirm screen. Tag `~/a/b` and `~/c` and the
+archive holds `a/b` and `c`.
 
 ## Notes
 

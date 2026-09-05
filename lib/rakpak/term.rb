@@ -64,6 +64,9 @@ module Rakpak
       c = getc_raw
       return nil if c.nil?
 
+      c = complete_utf8(c)
+      return nil if c.nil?
+
       case c
       when "\e"  then read_escape
       when "\r", "\n" then :enter
@@ -73,6 +76,29 @@ module Rakpak
       when "\x00".."\x1f" then :"ctrl_#{(c.ord + 96).chr}"
       else c
       end
+    end
+
+    # Under a C locale getc yields one byte at a time, and under UTF-8 a
+    # stray byte arrives as a one-byte invalid string. Gather the rest of
+    # the sequence when there is one; if the result is still not valid
+    # text, the key is dropped rather than raised on later.
+    def complete_utf8(c)
+      s = c.dup.force_encoding(Encoding::UTF_8)
+      return s if s.valid_encoding?
+
+      lead = s.getbyte(0)
+      need = if lead.between?(0xC2, 0xDF) then 1
+             elsif lead.between?(0xE0, 0xEF) then 2
+             elsif lead.between?(0xF0, 0xF4) then 3
+             else 0
+             end
+      need.times do
+        more = getc_raw(ESC_WINDOW)
+        break if more.nil?
+
+        s = (s.b + more.b).force_encoding(Encoding::UTF_8)
+      end
+      s.valid_encoding? ? s : nil
     end
 
     def getc_raw(timeout = nil)
