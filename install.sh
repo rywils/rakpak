@@ -1,8 +1,8 @@
 #!/bin/sh
 # Installs rakpak so it can be run from anywhere.
 #
-#   ./install.sh              copy into ~/.local/share/rakpak, link ~/.local/bin/rakpak
-#   ./install.sh --link       link straight to this checkout instead (edits take effect at once)
+#   ./install.sh              copy into ~/.local/share/rakpak, launcher in ~/.local/bin
+#   ./install.sh --link       run straight from this checkout instead (edits take effect at once)
 #   ./install.sh --prefix DIR install under DIR/share/rakpak and DIR/bin (e.g. /usr/local)
 #   ./install.sh --uninstall  remove what a previous run put in place
 #
@@ -48,18 +48,20 @@ mkdir -p "$bin"
 rm -f "$launcher"
 
 if [ "$mode" = link ]; then
-  target="${here}/bin/rakpak"
-  echo "linking $launcher -> $target"
+  root="$here"
+  echo "running from $root"
 else
   rm -rf "$share"
   mkdir -p "$share"
   cp -R "${here}/bin" "${here}/lib" "$share/"
   cp "${here}/README.md" "$share/" 2>/dev/null || true
-  chmod +x "${share}/bin/rakpak"
-  target="${share}/bin/rakpak"
+  root="$share"
   echo "installed to $share"
 fi
-ln -s "$target" "$launcher"
+# The launcher in bin/ is the same stub the gem ships, so it does not set
+# the load path itself; this wrapper does.
+printf '#!/bin/sh\nexec ruby -I "%s/lib" "%s/bin/rakpak" "$@"\n' "$root" "$root" > "$launcher"
+chmod +x "$launcher"
 echo "created $launcher"
 
 # Is the bin folder on PATH already?

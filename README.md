@@ -11,18 +11,18 @@ Needs Ruby 3.0 or newer and nothing else.
 ## Install
 
 ```
-./install.sh
+gem install rakpak
 ```
 
-That copies the program to `~/.local/share/rakpak` and links `~/.local/bin/rakpak`
-to it. If that bin folder is not on your PATH yet, a line adding it is appended
-to your shell startup file (bash, zsh or fish), so the next terminal you open
-has `rakpak` everywhere.
+Then `rakpak` from any folder. If your shell cannot find it afterwards, the
+folder RubyGems puts executables in is not on your PATH; `gem env` shows it
+under EXECUTABLE DIRECTORY.
 
-- `./install.sh --link` points the launcher at this checkout instead, so edits
-  here take effect without reinstalling.
-- `./install.sh --prefix /usr/local` installs system-wide (run with sudo).
-- `./install.sh --uninstall` removes it again.
+Without RubyGems, clone this repo and run `./install.sh`. That copies the
+program to `~/.local/share/rakpak` and puts a launcher in `~/.local/bin`,
+adding that folder to your shell startup file if it is not on your PATH yet.
+`./install.sh --link` runs straight from the checkout so edits take effect at
+once, `--prefix /usr/local` installs system-wide, and `--uninstall` removes it.
 
 ```
 rakpak                    browse from your home folder

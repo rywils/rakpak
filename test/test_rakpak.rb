@@ -1401,3 +1401,18 @@ class SecondReviewTest < Minitest::Test
     assert_equal 500, sizer["#{@dir}/x"].bytes
   end
 end
+
+class GemspecTest < Minitest::Test
+  def test_the_gem_ships_the_program_and_nothing_else
+    spec = Gem::Specification.load(File.expand_path("../rakpak.gemspec", __dir__))
+    assert_equal "rakpak", spec.name
+    assert_equal Rakpak::VERSION, spec.version.to_s
+    assert_equal ["rakpak"], spec.executables
+    assert_includes spec.files, "bin/rakpak"
+    assert_includes spec.files, "lib/rakpak.rb"
+    assert_includes spec.files, "lib/rakpak/app.rb"
+    assert_includes spec.files, "README.md"
+    refute(spec.files.any? { |f| f.start_with?("test/") || f == "install.sh" })
+    assert_equal ">= 3.0", spec.required_ruby_version.to_s
+  end
+end
