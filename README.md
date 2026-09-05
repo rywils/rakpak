@@ -122,11 +122,11 @@ archive holds `a/b` and `c`.
 
 ## Notes
 
-- Commands are spawned directly, never through a shell. Filenames containing
-  spaces, quotes, `$`, `;` or a leading `-` are safe.
+- Commands are run directly, not in a shell. Filenames containing spaces,
+  quotes, `$`, `;` or a leading `-` are safe.
 - Cancelling kills the whole process group, so the compressor goes too.
-- The tagged-size readout walks folders on a worker thread with a time budget;
-  `≥` means it stopped early and the real figure is larger.
+- Folder sizes are counted in the background. A folder too large to finish
+  counting in a few seconds shows `≥`, meaning the real size is at least that.
 
 ## Tests
 
