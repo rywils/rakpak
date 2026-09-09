@@ -3,17 +3,18 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rywils/rakpak/actions/workflows/ci.yml"><img src="https://github.com/rywils/rakpak/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
+  <a href="https://github.com/eof0/rakpak/actions/workflows/ci.yml"><img src="https://github.com/eof0/rakpak/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
   <a href="https://rubygems.org/gems/rakpak"><img src="https://img.shields.io/gem/v/rakpak" alt="gem version"></a>
   <a href="https://rubygems.org/gems/rakpak"><img src="https://img.shields.io/gem/dt/rakpak" alt="downloads"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/rywils/rakpak" alt="license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/eof0/rakpak" alt="license"></a>
 </p>
 
-<p align="center">Tag files and folders anywhere on your filesystem, then archive them all at once.</p>
+<p align="center">Tag files and folders anywhere on your filesystem, then archive them all at once, or unpack one you already have.</p>
 
 You walk around, press `space` on anything you want, press `p`, answer a few
 questions, and it builds the archive. The progress view can be sent to the
-background while you keep browsing.
+background while you keep browsing. Press `u` on an archive instead and it
+unpacks, wherever you want it.
 
 Needs Ruby 3.0 or newer and nothing else.
 
@@ -39,6 +40,8 @@ rakpak ~/Documents        browse from there instead
 rakpak .                  browse from the current folder
 rakpak -p ~/Documents     pack that folder: opens on the archive prompts
 rakpak -p a.txt b/ c      pack several things at once
+rakpak -d site.tar.gz     unpack it here and now, into site/
+rakpak -d a.tgz b.zip     unpack several, each into its own folder
 ```
 
 ## Starting up
@@ -52,6 +55,13 @@ browser opens on the folder holding the first one with the cursor resting on
 it, and the archive prompts appear at once, starting with the kind of archive
 and its compression. The archive is written next to that first path. Press
 `esc` on any prompt and you are back in the browser with the tags still set.
+
+`-d` (or `--depack`) does not open the browser at all. Each archive is
+unpacked straight into the folder you are standing in, the way `tar` would,
+each one into a folder of its own name: `site.tar.gz` gives you `site/`.
+A lone compressed file has nothing to wrap, so `notes.txt.gz` lands
+beside you as `notes.txt`. One bad archive does not stop the rest, and the
+exit status is non-zero if any of them failed.
 
 ## The flow
 
@@ -76,6 +86,24 @@ and its compression. The archive is written next to that first path. Press
 
 If nothing is tagged, `p` archives whatever the cursor is on.
 
+## Unpacking
+
+`u` on an archive opens three prompts: which folder to unpack into, what to
+call the folder it makes there, and the usual confirm screen showing the
+exact command.
+
+Unlike `p`, this follows the cursor rather than the tag set: one archive, one
+destination. The folder is offered as the archive's own name with the
+extension taken off, so `site.tar.gz` suggests `site/`, which means nothing
+is ever sprayed across the folder you are standing in. Type `.` as
+the name to unpack straight into the folder you picked instead, and the
+folder prompt takes `~`, `$HOME` and any absolute path, so the contents can
+go anywhere. A lone compressed file skips the folder entirely.
+
+If the destination already has files in it, the confirm screen says so before
+anything runs. A failed extraction leaves whatever it managed to write; the
+files that were already there are never touched.
+
 ## Keys
 
 | | |
@@ -95,6 +123,7 @@ If nothing is tagged, `p` archives whatever the cursor is on.
 | `.` | show hidden files |
 | `ctrl-r` | reload |
 | `p` | pack: archive what is tagged |
+| `u` | unpack the archive under the cursor |
 | `b` | watch a running job |
 | `?` | all keys |
 | `q` | quit |
@@ -119,9 +148,16 @@ here too, so `notes.txt` becomes `notes.txt.gz` or `notes.txt.zst` without a
 tarball around it. For a folder those are greyed out with the reason, since
 `gzip` alone cannot take a folder.
 
+Every one of those can be read back: `.tar`, `.tar.gz`, `.tar.zst`, `.tar.xz`,
+`.tar.bz2`, `.tar.lz4`, `.tar.br`, the `.tgz`, `.tzst`, `.txz` and `.tbz2`
+short forms, `.zip` via `unzip`, and `.gz`, `.zst`, `.xz`, `.bz2`, `.lz4` or
+`.br` on their own.
+
 Everything is probed at startup: `PATH` for the compressors, `tar --version` to
 tell GNU tar from bsdtar from busybox, and `zip -v` for its compiled-in methods.
 Anything that will not work on this machine is greyed out with the reason.
+Unpacking a `.zip` wants `unzip`, which is a different program from the `zip`
+used to write one, so it is checked on its own.
 
 ## How the archive is shaped
 
@@ -133,7 +169,10 @@ archive holds `a/b` and `c`.
 
 - Commands are run directly, not in a shell. Filenames containing spaces,
   quotes, `$`, `;` or a leading `-` are safe.
-- Cancelling kills the whole process group, so the compressor goes too.
+- Cancelling kills the whole process group, so the compressor goes too. A
+  cancelled pack removes its half-written archive; a cancelled unpack leaves
+  the files it had already extracted, since deleting a folder is not
+  rakpak's call to make.
 - Folder sizes are counted in the background. A folder too large to finish
   counting in a few seconds shows `≥`, meaning the real size is at least that.
 

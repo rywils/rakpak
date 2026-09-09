@@ -6,6 +6,7 @@ require_relative "browser"
 require_relative "modal"
 require_relative "formats"
 require_relative "plan"
+require_relative "unpack"
 require_relative "job"
 require_relative "sizer"
 
@@ -63,6 +64,7 @@ module Rakpak
   class App
     SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     WIZARD = %i[target options where output confirm].freeze
+    UNPACK = %i[dest_where dest_name unpack_confirm].freeze
 
     # `pack` is a list of paths to tag before the first frame; when it is
     # non-empty the archive prompts open immediately (rakpak -p).
@@ -81,6 +83,7 @@ module Rakpak
       @notice = nil
       @notice_until = nil
       @plan = nil
+      @wizard = WIZARD
       @wizard_pos = nil
       @quit = false
       return if pack.empty?
@@ -194,24 +197,30 @@ module Rakpak
       @screen.put([(@screen.w - Text.width(want)) / 2, 0].max, (@screen.h / 2) + 1, want, Theme::DIM)
     end
 
+    # Only the running state says which direction the work goes; the rest
+    # read the same either way.
+    def job_title(job, state)
+      case state
+      when :running then job.plan.gerund
+      when :done then "finished"
+      when :failed then "failed"
+      when :cancelled then "cancelled"
+      else "queued"
+      end
+    end
+
     def draw_job(job)
       s = @screen
       s.fill(0, 0, s.w, 1, " ", Theme::HEAD)
-      title = case job.state
-              when :running then "archiving"
-              when :done then "finished"
-              when :failed then "failed"
-              when :cancelled then "cancelled"
-              else "queued"
-              end
       s.put(1, 0, "rakpak", Theme::HEAD + "\e[1;38;5;39m")
-      s.put(9, 0, title, Theme::HEAD + "\e[38;5;231m")
+      s.put(9, 0, job_title(job, job.state), Theme::HEAD + "\e[38;5;231m")
       s.put(s.w - 20, 0, Text.duration(job.elapsed), Theme::HEAD + Theme::DIM)
 
       y = 2
       job.plan.outputs.each do |out|
+        # A folder being extracted into has no size worth showing.
         size = begin
-          File.size(out)
+          File.directory?(out) ? nil : File.size(out)
         rescue StandardError
           nil
         end
@@ -287,6 +296,7 @@ module Rakpak
       case @browser.handle(key)
       when :quit then request_quit
       when :archive then start_wizard
+      when :unpack then start_unpack
       when :tags then open_tags
       when :help then open_help
       when :jobs then open_jobs
@@ -351,6 +361,32 @@ module Rakpak
       @name_edited = false
       @where = 0
       @where_text = ""
+      @wizard = WIZARD
+      @wizard_pos = 0
+      open_wizard_step
+    end
+
+    # Unpacking follows the cursor rather than the tag set: an archive is one
+    # thing with one destination, not a pile to gather up.
+    def start_unpack
+      e = @browser.current
+      unless e && File.file?(e.path) && Unpack.archive?(e.path)
+        @modal = MessageModal.new(
+          title: "not an archive",
+          lines: ["rakpak unpacks tarballs, zips and single",
+                  "compressed files: .tar, .tar.gz, .tar.zst,",
+                  ".tar.xz, .tar.bz2, .tar.lz4, .tar.br, .zip,",
+                  "and .gz, .zst, .xz, .bz2, .lz4, .br on their own."],
+          style: Theme::WARN
+        )
+        return
+      end
+      @plan = Unpack.new(archive: e.path, dest: @browser.cwd)
+      @dest_parent = @browser.cwd
+      @dest_name = Unpack.default_subdir(e.path) || "."
+      @where = 0
+      @where_text = ""
+      @wizard = UNPACK
       @wizard_pos = 0
       open_wizard_step
     end
@@ -369,7 +405,7 @@ module Rakpak
 
     def open_wizard_step
       loop do
-        step = WIZARD[@wizard_pos]
+        step = @wizard[@wizard_pos]
         return finish_wizard if step.nil?
 
         modal = build_step(step)
@@ -383,7 +419,7 @@ module Rakpak
     end
 
     def wizard_forward(modal)
-      apply_step(WIZARD[@wizard_pos], modal)
+      apply_step(@wizard[@wizard_pos], modal)
       return if @wizard_pos.nil? # a step may have ended the wizard itself
 
       @wizard_pos += 1
@@ -398,7 +434,7 @@ module Rakpak
           @plan = nil
           return
         end
-        modal = build_step(WIZARD[@wizard_pos])
+        modal = build_step(@wizard[@wizard_pos])
         next if modal.nil?
 
         @modal = modal
@@ -413,6 +449,9 @@ module Rakpak
       when :where then where_modal
       when :output then output_modal
       when :confirm then confirm_modal
+      when :dest_where then dest_where_modal
+      when :dest_name then dest_name_modal
+      when :unpack_confirm then unpack_confirm_modal
       end
     end
 
@@ -429,6 +468,15 @@ module Rakpak
         @name_edited = true
         @plan.basename = modal.result
       when :confirm then launch
+      when :dest_where
+        @where = modal.index
+        @where_text = modal.text
+        @dest_parent = @where == 2 ? Rakpak.expand_dir(modal.result) : modal.result
+        sync_dest
+      when :dest_name
+        @dest_name = modal.result
+        sync_dest
+      when :unpack_confirm then launch
       end
     end
 
@@ -494,12 +542,55 @@ module Rakpak
 
     def where_modal
       WhereModal.new(here: @browser.cwd, home: Dir.home, index: @where, text: @where_text,
-                     validate: lambda { |text|
-                       d = Rakpak.expand_dir(text)
-                       if !File.directory?(d) then "not a folder: #{d}"
-                       elsif !File.writable?(d) then "not writable: #{d}"
+                     validate: method(:writable_folder))
+    end
+
+    def writable_folder(text)
+      d = Rakpak.expand_dir(text)
+      if !File.directory?(d) then "not a folder: #{d}"
+      elsif !File.writable?(d) then "not writable: #{d}"
+      end
+    end
+
+    def dest_where_modal
+      WhereModal.new(here: @browser.cwd, home: Dir.home, index: @where, text: @where_text,
+                     validate: method(:writable_folder), title: "unpack it where?")
+    end
+
+    # nil when there is no folder to name, which open_wizard_step skips over.
+    def dest_name_modal
+      return nil if @plan.single?
+
+      InputModal.new(title: "unpack into",
+                     value: @dest_name,
+                     hint: "a new folder in #{Text.tilde(@dest_parent)}  ·  . unpacks straight in",
+                     validate: lambda { |name|
+                       # The folder was chosen on the previous screen, so this
+                       # is a bare name and can never reach outside it.
+                       if name.include?("/") then "just a name, no slashes; the folder was picked already"
+                       elsif name.include?("\0") || name == ".." then "not a valid name"
                        end
                      })
+    end
+
+    # "." is how you say "no subfolder, straight into the folder I picked",
+    # and a lone compressed file never has one to begin with.
+    def sync_dest
+      @plan.dest = @dest_name == "." ? @dest_parent : File.join(@dest_parent, @dest_name)
+    end
+
+    def unpack_confirm_modal
+      lines = [[:head, "unpacks #{Text.tilde(@plan.archive)}"],
+               [:key, ""],
+               [:head, "into #{Text.tilde(@plan.dest)}"],
+               [:key, ""]]
+      @plan.preview.each do |label, cmd|
+        lines << [:head, "#{label}:"]
+        lines << [:cmd, "   #{cmd}"]
+      end
+      lines << [:key, ""]
+      ConfirmModal.new(title: "ready", lines: lines,
+                       warnings: @plan.warnings, errors: @plan.problems)
     end
 
     def output_modal
@@ -540,8 +631,7 @@ module Rakpak
 
     # Always opens the job view; b from there sends it to the background.
     def launch
-      total = @sizer.total(@plan.paths)
-      job = Job.new(@plan, total_files: total.files.positive? ? total.files : nil).start
+      job = Job.new(@plan, total_files: @plan.total_members(@sizer)).start
       @jobs << job
       @focus_job = job
       @wizard_pos = nil
@@ -557,9 +647,7 @@ module Rakpak
         next if @mode == :job && @focus_job == j
 
         case j.state
-        when :done
-          sizes = j.summary.map { |n, sz| "#{n} #{Text.bytes(sz)}" }.join(" · ")
-          notify("✓ #{sizes}", Theme::OK, 8)
+        when :done then notify("✓ #{j.plan.outcome}", Theme::OK, 8)
         when :failed then notify("✗ #{j.error}", Theme::ERR, 10)
         when :cancelled then notify("cancelled", Theme::WARN)
         end
@@ -597,6 +685,7 @@ module Rakpak
         ["/", "filter this folder"], [".", "show hidden"],
         ["ctrl-r", "reload"],
         ["p", "pack: archive the tagged items"],
+        ["u", "unpack the archive under the cursor"],
         ["b", "watch running jobs"], ["q", "quit"]
       ]
       w = keys.map { |k, _| Text.width(k) }.max
@@ -627,7 +716,7 @@ module Rakpak
       done.each do |j|
         # Printed after the TUI has gone, straight to the shell, so a folder
         # or file name carrying an escape sequence must be defanged.
-        j.summary.each { |name, size| puts "#{Text.plain(File.join(j.plan.outdir, name))}  #{Text.bytes(size)}" }
+        puts "#{Text.plain(j.plan.outputs.first)}  #{Text.plain(j.plan.report_note)}"
       end
     end
   end

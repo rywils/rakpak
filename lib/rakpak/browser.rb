@@ -159,7 +159,7 @@ module Rakpak
       !idx.nil?
     end
 
-    # Returns :quit, :archive, :tags, :help, :jobs or nil.
+    # Returns :quit, :archive, :unpack, :tags, :help, :jobs or nil.
     def handle(key)
       return handle_filter(key) if @filtering
 
@@ -197,12 +197,13 @@ module Rakpak
       when :ctrl_r then refresh!
       when "~" then goto(Dir.home)
       when "p" then :archive
+      when "u" then :unpack
       when "T" then :tags
       when "?" then :help
       when "b" then :jobs
       when "q", :ctrl_c then :quit
       end
-      %i[archive tags help jobs quit].include?(result) ? result : nil
+      %i[archive unpack tags help jobs quit].include?(result) ? result : nil
     end
 
     def toggle_hidden
@@ -487,7 +488,7 @@ module Rakpak
     end
 
     HINTS = [["space", "tag"], ["←→", "nav"], ["a", "all"], ["t", "queue"], ["/", "find"],
-             [".", "hidden"], ["p", "pack"], ["?", "help"]].freeze
+             [".", "hidden"], ["p", "pack"], ["u", "unpack"], ["?", "help"]].freeze
 
     def draw_footer(screen, y, status_line)
       screen.fill(0, y, screen.w, 1, " ", nil)

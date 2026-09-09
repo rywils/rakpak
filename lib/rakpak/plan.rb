@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "formats"
+require_relative "text"
 
 module Rakpak
   # Turns a set of tagged paths plus the wizard's answers into one concrete
@@ -158,6 +159,40 @@ module Rakpak
 
     def output = File.join(@outdir, ensure_ext(@basename, ext))
     def outputs = [output]
+
+    # Nothing to make ready: the destination folder was checked, not created,
+    # and every step writes straight to its final name.
+    def prepare; end
+    def commit; end
+    def rollback; end
+
+    # What the job view calls this work while it runs.
+    def gerund = "archiving"
+
+    # One line for the notice when it finishes.
+    def outcome
+      outputs.map { |o| "#{File.basename(o)} #{Text.bytes(file_size(o))}" }.join(" · ")
+    end
+
+    # What follows the path on the line printed to the shell afterwards.
+    def report_note = Text.bytes(file_size(output))
+
+    def file_size(path)
+      File.size(path)
+    rescue StandardError
+      nil
+    end
+
+    # How many members the job should expect, for the progress bar. The
+    # sizer has been counting the selection since it was tagged.
+    def total_members(sizer)
+      files = sizer.total(@paths).files
+      files.positive? ? files : nil
+    end
+
+    # Every step here writes one archive file, and the confirm screen has
+    # said an existing one goes.
+    def clobbers_output? = true
 
     # Extensions a user might type that we would otherwise double up.
     ARCHIVE_EXTS = (TAR_CODECS.map(&:ext) + TAR_CODECS.map(&:single_ext) + %w[.tgz .tbz2 .txz .zip])

@@ -364,8 +364,8 @@ module Rakpak
   class WhereModal < Modal
     attr_reader :index
 
-    def initialize(here:, home:, index: 0, text: "", validate: nil)
-      super(title: "save it where?", footer: "1-3 or ↑↓ pick · enter choose · esc back")
+    def initialize(here:, home:, index: 0, text: "", validate: nil, title: "save it where?")
+      super(title: title, footer: "1-3 or ↑↓ pick · enter choose · esc back")
       @choices = [["This directory", here], ["Home directory", home], ["Specify", nil]]
       @index = index
       @field = InputModal.new(title: "", value: text, validate: validate)

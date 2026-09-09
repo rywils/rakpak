@@ -67,14 +67,22 @@ module Rakpak
       [base + (per * [@file_count.to_f / @total_files, 1.0].min), 1.0].min
     end
 
-    # Bytes on disk for whatever this step is writing right now.
+    # Bytes on disk for whatever this step is writing right now. A folder
+    # being extracted into has only its own inode size, which means nothing.
     def output_size
-      out = @plan.outputs[[@step_index, @plan.outputs.size - 1].min]
-      return nil unless out
+      out = writing_now
+      return nil if out.nil? || File.directory?(out)
 
       File.size(out)
     rescue StandardError
       nil
+    end
+
+    # A step redirected to a file is writing that file; otherwise the tool is
+    # writing the plan's output itself.
+    def writing_now
+      i = [@step_index, @steps.size - 1].min
+      @steps[i]&.[](3) || @plan.outputs[[i, @plan.outputs.size - 1].min]
     end
 
     def summary
@@ -132,6 +140,7 @@ module Rakpak
     end
 
     def run_all
+      @plan.prepare
       @steps.each_with_index do |(label, argv, verbose, stdout), idx|
         @step_index = idx
         @file_count = 0
@@ -149,6 +158,7 @@ module Rakpak
         end
         @spawned = nil
       end
+      @plan.commit
       finish(:done)
     rescue StandardError => e
       @error = "#{e.class}: #{e.message}"
@@ -169,7 +179,10 @@ module Rakpak
     end
 
     def finish(state)
-      cleanup_incomplete if %i[failed cancelled].include?(state)
+      if %i[failed cancelled].include?(state)
+        cleanup_incomplete
+        @plan.rollback
+      end
       @state = state
       @finished_at = now
     end
@@ -178,7 +191,13 @@ module Rakpak
     # members, then fails. Remove it, but only the output of the step that
     # was actually interrupted. Archives finished by earlier steps are whole
     # and must survive, and a step that never spawned wrote nothing.
+    #
+    # An extraction is the other way round: its output is a folder full of
+    # files that were there before, or are the part of the job that did
+    # work. Those are not ours to throw away.
     def cleanup_incomplete
+      return unless @plan.clobbers_output?
+
       path = @spawned
       return unless path && File.exist?(path)
 
@@ -191,25 +210,31 @@ module Rakpak
     # `stdout` names a file the command's output is the archive for (gzip -c);
     # otherwise stdout joins stderr in the log.
     def run_step(argv, stdout = nil)
-      out = @plan.outputs[@step_index]
-      # Every tool here is asked to create the archive, and the confirm
-      # screen has said an existing one will be overwritten. zip would
-      # otherwise update it in place, keeping members that no longer exist.
-      File.unlink(out) if out && File.exist?(out)
+      out = stdout || @plan.outputs[@step_index]
+      # Every tool asked to create an archive gets a clear path to write to,
+      # and the confirm screen has said an existing one will be overwritten.
+      # zip would otherwise update it in place, keeping members that no
+      # longer exist. An extraction writes into a folder instead, which must
+      # be left exactly as it is.
+      clear_path(out) if @plan.clobbers_output?
       @spawned = out
 
       rd, wr = IO.pipe
+      sink = nil
       begin
-        pid = Process.spawn(*argv, out: stdout ? [stdout, "wb"] : wr, err: wr, in: File::NULL,
+        sink = open_sink(stdout) if stdout
+        pid = Process.spawn(*argv, out: sink || wr, err: wr, in: File::NULL,
                                    pgroup: true, chdir: @plan.base)
       rescue StandardError => e
         # Nothing was spawned, so nothing will close these for us.
         rd.close
         wr.close
+        sink&.close
         @error = e.message
         return nil
       end
       wr.close
+      sink&.close
       @pid = pid
       # A cancel that raced the spawn saw no pid to signal; do it now.
       kill_current if @cancel
@@ -243,6 +268,32 @@ module Rakpak
       @pid = nil
       status
     end
+
+    # Never a directory: that is a destination, not something we wrote.
+    #
+    # lstat, not exist?: a symlink whose target is missing does not "exist",
+    # and leaving one here would mean opening the path later and writing
+    # through it to wherever it points. Remove the link itself.
+    def clear_path(path)
+      return unless path
+
+      st = begin
+        File.lstat(path)
+      rescue StandardError
+        return
+      end
+      File.unlink(path) unless st.directory?
+    end
+
+    # The tool must never open its own output: between clearing the path and
+    # the spawn, anything already sitting there could be a symlink out of the
+    # folder. O_EXCL means we either create the file or refuse to write at
+    # all, and O_NOFOLLOW refuses a link even if one appears first.
+    SINK_FLAGS = File::WRONLY | File::CREAT | File::EXCL |
+                 (defined?(File::NOFOLLOW) ? File::NOFOLLOW : 0)
+
+    # 0666 so the result lands on the user's umask, as a shell redirect would.
+    def open_sink(path) = File.open(path, SINK_FLAGS, 0o666)
 
     def record(line)
       return if line.empty?
